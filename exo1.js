@@ -10,7 +10,7 @@ MongoClient.connect(url, function(err, db) {
     var collection = db.collection('visits');
 
     var mapper = function() {
-        var key = [this.user_id, this.url, this.hour];
+        var key = [this.url, this.hour];
 
         emit(key, 1);
     };
