@@ -26,11 +26,6 @@ MongoClient.connect(url, function(err, db) {
         return(key, sum);
     };
 
-    // Map function
-    var map = function() { emit(this.user_id, 1); };
-    // Reduce function
-    var reduce = function(k,vals) { return 1; };
-
     collection.mapReduce(mapper, reducer, {out : {inline: 1}, verbose:true}, function(err, results, stats) {
         console.log(results)
     });
