@@ -9,10 +9,10 @@ MongoClient.connect('mongodb://localhost:27017/myproject', function(err, db) {
 
     // Graph
     var graph = [
-       { _id: 'A', value:{ url: 'A', pageRank: 1, adjlist: ['B', 'C'] }},
-       { _id: 'B', value:{ url: 'B', pageRank: 1, adjlist: ['C'] }},
-       { _id: 'C', value:{ url: 'C', pageRank: 1, adjlist: ['A'] }},
-       { _id: 'D', value:{ url: 'D', pageRank: 1, adjlist: ['C'] }},
+       { _id: 'A', value:{ pageRank: 1, adjlist: ['B', 'C'] }},
+       { _id: 'B', value:{ pageRank: 1, adjlist: ['C'] }},
+       { _id: 'C', value:{ pageRank: 1, adjlist: ['A'] }},
+       { _id: 'D', value:{ pageRank: 1, adjlist: ['C'] }},
     ];
 
     collection.removeMany();
@@ -20,15 +20,19 @@ MongoClient.connect('mongodb://localhost:27017/myproject', function(err, db) {
     collection.insertMany(graph, {w: 1}).then(function(result) {
 
         var map = function() {
+
+            var vertex = this._id;
+            var adjlist = this.value.adjlist;
+            var adjlistLenght = this.value.adjlist.length;
             
-            for (var i = 0, len = this.value.adjlist.length; i < len; i++) {
-                emit(this.value.adjlist[i], this.value.pageRank / len);
+            for (var i = 0; i < adjlistLenght; i++) {
+                emit(adjlist[i], this.value.pageRank / adjlistLenght);
             }
 
             // Vérifie si le reduce est appelé
-            emit(this.value.url, 0);
+            emit(vertex, 0);
             // Passage des valeurs de pageRank au reduce
-            emit(this.value.url, this.value.adjlist);
+            emit(vertex, adjlist);
 
         };
 
@@ -46,7 +50,7 @@ MongoClient.connect('mongodb://localhost:27017/myproject', function(err, db) {
             }
 
             pageRank = 1 - dampingFactor + dampingFactor * pageRank;
-            return { url: key, pageRank: pageRank, adjlist: adjlist };
+            return { pageRank: pageRank, adjlist: adjlist };
         };
 
         function bfsIteration(currentLoop, maxLoop, callback) {
