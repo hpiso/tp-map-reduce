@@ -1,166 +1,80 @@
 var MongoClient = require('mongodb').MongoClient,
-   test = require('assert');
-MongoClient.connect('mongodb://localhost:27017/graph_algorithms', function(err, db) {
+    test = require('assert');
 
-   // Create a test collection
-   var collection = db.collection('SSSP');
-   //Pour garder le chemin, enregistrer un backpointer.
-   var graph =
-       [
-           { _id:"Ed" ,  value:{ backpointer: "", changed: false, type: "full", distance: 0, adjlist: ["Frank", "Julien"]}},
-           { _id:"Frank", value:{ backpointer: "",changed: false,type: "full", distance: Infinity, adjlist: ["Ed"]}},
-           { _id:"Julien",value:{ backpointer: "",changed: false,type: "full", distance: Infinity, adjlist: ["Ed", "Florentin", "Valere"]}},
-           { _id:"Valere", value:{ backpointer: "",changed: false,type: "full", distance: Infinity, adjlist: ["Julien", "Florentin", "Bruno"]}},
-           { _id:"Bruno", value:{ backpointer: "",changed: false,type: "full", distance: Infinity, adjlist: ["Valere"]}},
-           { _id:"Florentin", value:{ backpointer: "",changed: false,type: "full", distance: Infinity, adjlist: ["Julien", "Valere"]}}
-       ];
+// Connexion au client Mongo
+MongoClient.connect('mongodb://localhost:27017/myproject', function(err, db) {
 
-   // console.log(graph);
+    // Collection de test
+    var collection = db.collection('SSSP');
 
-   collection.removeMany(); //Efface tout (sync)
+    // Graph
+    var graph = [
+       { _id: 'A', value:{ url: 'A', pageRank: 1, adjlist: ['B', 'C'] }},
+       { _id: 'B', value:{ url: 'B', pageRank: 1, adjlist: ['C'] }},
+       { _id: 'C', value:{ url: 'C', pageRank: 1, adjlist: ['A'] }},
+       { _id: 'D', value:{ url: 'D', pageRank: 1, adjlist: ['C'] }},
+    ];
 
-   // Insert some documents to perform map reduce over
-   //Utilise une promise
-   collection.insertMany(graph, {w:1}).then(function (result) {
+    collection.removeMany();
 
-       //Map utilise l'objet this
-       var map = function () {
+    collection.insertMany(graph, {w: 1}).then(function(result) {
 
-           //    print(tojson(this));
+        var map = function() {
+            
+            for (var i = 0, len = this.value.adjlist.length; i < len; i++) {
+                emit(this.value.adjlist[i], this.value.pageRank / len);
+            }
 
-           var vertex = this._id;
-           var adjlist = this.value.adjlist;
-           var distance = this.value.distance;
+            // Vérifie si le reduce est appelé
+            emit(this.value.url, 0);
+            // Passage des valeurs de pageRank au reduce
+            emit(this.value.url, this.value.adjlist);
 
-           // print("Full objet emit");
-           //print(vertex, this);
-           emit(vertex, this.value); //Re-émettre la même chose
+        };
 
-           if (distance == Infinity) return; //Si la distance est infinie, pas besoin d'emitter des trucs...
+        var reduce = function(key, values) {
+            
+            var adjlist = [];
+            var pageRank = 0.0;
+            var dampingFactor = 0.85;
 
-           for (var i = 0; i < adjlist.length; i++) {
+            for (var i = 0, len = values.length; i < len; i++) {
+                if (values[i] instanceof Array)
+                    adjlist = values[i];
+                else
+                    pageRank += values[i];
+            }
 
-               var adj = adjlist[i]; //valere, julien etc
-               //  print(adj, distance+1);
-               var objet = {type:"compact", distance:distance+1, backpointer:vertex};
+            pageRank = 1 - dampingFactor + dampingFactor * pageRank;
+            return { url: key, pageRank: pageRank, adjlist: adjlist };
+        };
 
-               //   print("map ", adj, tojson(objet));
-               emit(adj, objet);
-           }
+        function bfsIteration(currentLoop, maxLoop, callback) {
 
-       };
+            // Appel des fonctions Map et Reduce
+            collection.mapReduce(map, reduce, {out: {replace: 'SSSP'}}).then(function(collection) {
 
-       //Find lowest distance and write it
-       var reduce = function (key, values)
-       {
-           print("1er Reduce : ", tojson(key), tojson(values));
-           var full = {};
+                collection.find().toArray().then(function (docs) {
 
-           //First, find the original one
-           for (var i = 0; i < values.length; i++)
-           {
-               var val = values[i];
-               if (val.type == "full") {
-                   full = val;
-               }
-           }
+                    if (currentLoop)
+                        console.log('*****************');
 
-           //On met full a "aucun changement"
-           full.changed = false;
+                    console.log('Valeur de I : ', currentLoop);
+                    console.log(docs);
 
-           //Then improve on it
-           for (var i = 0; i < values.length; i++)
-           {
-               var val = values[i];
-               if (val.type == "compact") {
-                   if (val.distance < full.distance) {
-                       full.changed = true;
-                       full.distance = val.distance;
-                       full.backpointer = val.backpointer;
-                   }
-               }
-           }
+                    // Lorsque le nombre d'itération max est atteint
+                    if (currentLoop == maxLoop)
+                        callback();
+                    
+                    bfsIteration(++ currentLoop, maxLoop, callback);
+                });
+            });
+        }
 
-           print("Full object de ", key);
-           print(tojson(full));
-           return full;
-       };
+        bfsIteration(0, 20, function finish() {
+            console.log('Fin du programme');
+            db.close();
+        });
 
-       //tf = test function
-       function bfs_iteration(i, max, cb)
-       {
-           // Peform the map reduce
-           collection.mapReduce(map, reduce, {out: {replace: "SSSP"}})
-           .then(function (collection)
-           {
-               collection.find().toArray()
-                   .then(function (docs)
-                   {
-                       console.log(docs);
-                       console.log("************************************************************************");
-                       console.log("************************************************************************");
-                       console.log("************************************************************************");
-
-                       //1ere condition d'arrêt. Le graphe converge (algo fini)
-                       //Sinon, on a egalement un maximum d'iterations
-                       //Nombre max d'iterations atteint
-                       console.log("VALEUR DE I = ", i);
-                       if (i == max)
-                           cb();
-
-                       // Peform a simple find and return all the documents
-                       collection.find({"value.changed": true}).toArray()
-                           .then(function (docs)
-                           {
-
-                               console.log("GROS LOG DES DOCS TROUVES");
-                               console.log("************************************************************************");
-                               console.log(docs);
-
-                               if (docs.length == 0) {
-                                   console.log("SORTIE TAKEN");
-                                   cb();
-                               }
-                               else {
-                                   console.log("ENCORE UNE ITERATION");
-                                   bfs_iteration(i + 1, max, cb);
-                               }
-                           })
-                   })
-           })
-       }
-
-   bfs_iteration(0, 10, function fin() {
-       console.log("Fin du programme!!!");
-       db.close();
-   })
-
-}) //Insertmany
-}) //MongoClient Connect
-
-/*
-
-function test(collection, cb)
-{
-// Execute aggregate, notice the pipeline is expressed as an Array
-var cursor = collection.aggregate([
-{
-$match: { "value.changed": true }
-}
-]);
-
-// Get all the aggregation results
-cursor.each(function(err, docs)
-{
-if(docs == null) {
-console.log("IL N'Y A AUCUN DOCUMENT CHANGÉ");
-cb(true);
-}
-else {
-console.log("IL Y A AU MOINS 1 DOCUMENT CHANGÉ");
-cb(false);
-}
-
-})
-}
-*/
+    });
+});
